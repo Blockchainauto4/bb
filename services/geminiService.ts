@@ -12,44 +12,64 @@ Your goal is to provide a personal hair color consultation based on the client's
 `;
 
 let ai: GoogleGenAI | null = null;
-const getAiClient = (): GoogleGenAI => {
+
+const getAiClient = (): GoogleGenAI | null => {
+  // Fix: Per coding guidelines, use `process.env.API_KEY` to access the API key.
+  // This resolves the error "Property 'env' does not exist on type 'ImportMeta'".
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    console.error("Gemini API Key is not configured. Please set the API_KEY environment variable in your deployment settings.");
+    return null;
+  }
+
   if (!ai) {
-    const apiKey = process.env.API_KEY || '';
-    if (!apiKey) {
-      // This will be visible in the browser console if the key is missing.
-      console.error("Gemini API Key is not configured. Please set the API_KEY environment variable.");
-    }
     ai = new GoogleGenAI({ apiKey });
   }
   return ai;
 };
 
+
 let chatSession: Chat | null = null;
 
 export const startChatSession = () => {
   const client = getAiClient();
-  chatSession = client.chats.create({
-    model: 'gemini-2.5-flash',
-    config: {
-      systemInstruction: CONSULTATION_SYSTEM_INSTRUCTION,
-    },
-  });
+  if (client) {
+    chatSession = client.chats.create({
+      model: 'gemini-2.5-flash',
+      config: {
+        systemInstruction: CONSULTATION_SYSTEM_INSTRUCTION,
+      },
+    });
+  } else {
+    chatSession = null;
+  }
 };
 
 export const sendMessageToGemini = async (message: string): Promise<string> => {
+  // Ensure the client is available, which checks for the API key.
+  const client = getAiClient();
+  if (!client) {
+      return "The consultation service is temporarily unavailable. Please ensure the API key is configured correctly.";
+  }
+
+  // Start a new chat session if one doesn't exist
   if (!chatSession) {
     startChatSession();
   }
   
+  // This can happen if startChatSession failed due to a missing client
+  if (!chatSession) {
+    return "The consultation service could not be initialized. Please check the API key configuration.";
+  }
+
   try {
-    const result: GenerateContentResponse = await chatSession!.sendMessage({ message });
+    const result: GenerateContentResponse = await chatSession.sendMessage({ message });
     return result.text || "I apologize, I couldn't generate a recommendation at this moment.";
   } catch (error) {
     console.error("Gemini API Error:", error);
-    // Check if the error is due to a missing API key and provide a user-friendly message.
-    if (error instanceof Error && error.message.includes('API key')) {
-      return "The consultation service is temporarily unavailable. Please ensure the API key is configured correctly."
+    if (error instanceof Error && (error.message.includes('API key') || error.message.includes('400'))) {
+      return "The consultation service is temporarily unavailable. The provided API key may be invalid or missing permissions."
     }
-    return "Unable to connect to the professional consultation service. Please check your connection.";
+    return "Unable to connect to the consultation service. Please check your internet connection and try again.";
   }
 };
